@@ -1,0 +1,476 @@
+<?php
+
+$serverName = "10.19.16.21";
+$database   = "prod_control";
+$username   = "sql_pre";
+$password   = "User@eng1";
+
+try {
+
+$conn = new PDO(
+"sqlsrv:Server=$serverName;Database=$database;Encrypt=no;TrustServerCertificate=yes",
+$username,
+$password
+);
+
+$conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+}
+catch(PDOException $e){
+die("Connection failed: ".$e->getMessage());
+}
+
+$selected_date = isset($_GET['filter_date']) ? $_GET['filter_date'] : '';
+$top_limit = isset($_GET['top_limit']) ? (int)$_GET['top_limit'] : 50;
+$shift = isset($_GET['shift']) ? $_GET['shift'] : '';
+
+$where = [];
+
+
+if($selected_date != '' && $shift != ''){
+
+    $next_day = date('Y-m-d', strtotime($selected_date . ' +1 day'));
+
+    if($shift == "1"){
+        $where[] = "created_at >= '$selected_date 07:30:00' 
+                    AND created_at <= '$selected_date 16:29:59'";
+    }
+
+    elseif($shift == "2"){
+        $where[] = "created_at >= '$selected_date 16:30:00' 
+                    AND created_at <= DATEADD(MINUTE,29,DATEADD(DAY,1,'$selected_date'))";
+    }
+
+    elseif($shift == "3"){
+        $where[] = "created_at BETWEEN '$next_day 00:30:00' AND '$next_day 07:29:59'";
+    }
+
+}
+elseif($selected_date != ''){
+    // kalau pilih tanggal saja (tanpa shift)
+    $start = $selected_date . " 00:00:00";
+    $end   = $selected_date . " 23:59:59";
+
+    $where[] = "created_at BETWEEN '$start' AND '$end'";
+}
+
+$whereSQL = "";
+if(count($where) > 0){
+$whereSQL = "WHERE ".implode(" AND ", $where);
+}
+
+$count_query = "
+SELECT COUNT(*) as total
+FROM assy_vision
+$whereSQL
+";
+
+$count_stmt = $conn->query($count_query);
+$total_data = $count_stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+$query = "
+SELECT TOP $top_limit
+CONVERT(VARCHAR,created_at,120) as created_at,
+barcode,
+jenis,
+type_pole,
+pole,
+sticker,
+type_battery,
+emboss,
+datecode,
+status,
+image_path
+FROM assy_vision
+$whereSQL
+ORDER BY created_at DESC
+";
+
+
+
+$stmt = $conn->query($query);
+
+if(!$stmt){
+die(print_r($conn->errorInfo(),true));
+}
+
+$data = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+?>
+
+<!DOCTYPE html>
+<html>
+<head>
+
+<title>Dashboard Monitoring</title>
+
+<link rel="icon" href="img/LogoCBI.png" type="image/png">
+
+<style>
+
+body{
+background:#061A40;
+font-family:Segoe UI;
+color:white;
+margin:0;
+padding:0;
+}
+
+.header-container{
+display:flex;
+align-items:center;
+justify-content:space-between;
+padding:10px 30px;
+}
+
+.header-left{
+display:flex;
+align-items:center;
+gap:15px;
+}
+
+.header{
+font-size:40px;
+font-weight:bold;
+background:#4D79D8;
+padding:15px 30px;
+border-radius:0 0 20px 0;
+}
+
+.refresh-btn{
+background:#00ccff;
+border:none;
+padding:10px 20px;
+font-size:16px;
+border-radius:10px;
+cursor:pointer;
+color:white;
+box-shadow:0 0 10px #00ccff;
+transition:0.3s;
+}
+
+.input-btn{
+background:#28a745;
+border:none;
+padding:10px 20px;
+font-size:16px;
+border-radius:10px;
+cursor:pointer;
+color:white;
+box-shadow:0 0 10px #28a745;
+transition:0.3s;
+}
+
+.input-btn:hover{
+background:#218838;
+}
+
+.refresh-btn:hover{
+background:#00aacc;
+}
+
+.logo-right-container{
+display:flex;
+align-items:center;
+gap:15px;
+}
+
+.logo-incoe{
+height:50px;
+}
+
+.logo-small{
+height:60px;
+}
+
+.container{
+padding:10px;
+}
+
+.title{
+font-size:28px;
+margin-bottom:10px;
+}
+
+table{
+width:100%;
+border-collapse:collapse;
+background:#0A1E50;
+border-radius:10px;
+overflow:hidden;
+}
+
+th{
+background:#152D6B;
+padding:12px;
+font-size:17px;
+}
+
+td{
+padding:10px;
+text-align:center;
+font-size:15px;
+border-bottom:1px solid #1f3c88;
+}
+
+.thumb{
+width:130px;
+border-radius:12px;
+box-shadow:0 0 12px #00ccff;
+cursor:pointer;
+}
+
+.ok{
+color:#00ff9c;
+font-weight:bold;
+}
+
+.ng{
+color:#ff4b4b;
+font-weight:bold;
+}
+
+.popup{
+display:none;
+position:fixed;
+z-index:999;
+padding-top:60px;
+left:0;
+top:0;
+width:100%;
+height:100%;
+background-color:rgba(0,0,0,0.9);
+}
+
+.popup-content{
+margin:auto;
+display:block;
+width:60%;
+border-radius:10px;
+}
+
+.close{
+position:absolute;
+top:20px;
+right:35px;
+color:#fff;
+font-size:40px;
+font-weight:bold;
+cursor:pointer;
+}
+
+.warn{
+color:#ffcc00;
+font-weight:bold;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="header-container">
+
+<div class="header-left">
+<div class="header">Dashboard</div>
+
+<button class="refresh-btn" onclick="location.reload();">
+🔄 Refresh
+</button>
+
+<button class="input-btn" onclick="window.location.href='InputData.php'">
+➕ Input Data
+</button>
+
+
+
+</div>
+
+<div class="logo-right-container">
+<img src="img/incoe.png" class="logo-incoe">
+<img src="img/LogoCBI.png" class="logo-small">
+</div>
+
+</div>
+
+<div class="container">
+
+<div class="title">
+Data Terbaru 
+</div>
+
+<form method="GET" style="margin-bottom:15px;">
+
+<input type="date" name="filter_date"
+value="<?= $selected_date ?>"
+style="padding:8px;border-radius:8px;">
+
+<select name="top_limit" style="padding:8px;border-radius:8px;">
+<option value="50" <?= $top_limit==50?'selected':'' ?>>Top 50</option>
+<option value="100" <?= $top_limit==100?'selected':'' ?>>Top 100</option>
+<option value="500" <?= $top_limit==500?'selected':'' ?>>Top 500</option>
+<option value="1000" <?= $top_limit==1000?'selected':'' ?>>Top 1000</option>
+</select>
+
+<select name="shift" style="padding:8px;border-radius:8px;">
+<option value="">All Shift</option>
+<option value="1" <?= $shift=="1"?'selected':'' ?>>Shift 1</option>
+<option value="2" <?= $shift=="2"?'selected':'' ?>>Shift 2</option>
+<option value="3" <?= $shift=="3"?'selected':'' ?>>Shift 3</option>
+</select>
+
+<button type="submit"
+style="padding:8px 15px;border-radius:8px;background:#00ccff;border:none;color:white;">
+Filter
+</button>
+
+<a href="index.php"
+style="padding:8px 15px;border-radius:8px;background:#ff4b4b;color:white;text-decoration:none;">
+Reset
+</a>
+
+<button type="submit" formaction="export_excel.php"
+style="padding:8px 15px;border-radius:8px;background:#28a745;border:none;color:white;">
+📥 Export Excel
+</button>
+
+<button type="submit" formaction="export_pdf.php"
+style="padding:8px 15px;border-radius:8px;background:#dc3545;border:none;color:white;">
+📄 Export PDF
+</button>
+
+</form>
+
+<div style="display:flex; justify-content:flex-end; margin-bottom:10px;">
+<input type="text" id="searchInput" placeholder="Search..."
+style="padding:8px;border-radius:8px;width:250px;">
+</div>
+
+<table id="dataTable">
+
+<tr>
+<th>Time</th>
+<th>Cover</th>
+<th>Type Pole</th>
+<th>Pole</th>
+<th>Sticker</th>
+<th>Type Battery</th>
+<th>CCA Battery</th>
+<th>Datecode</th>
+<th>Image</th>
+<th>Barcode</th>
+<th>Status</th>
+</tr>
+
+<?php foreach($data as $row){ ?>
+
+<tr>
+
+<td><?= $row['created_at'] ?></td>
+
+<td><?= $row['jenis'] ?></td>
+
+<td><?= $row['type_pole'] ?></td>
+
+<td class="<?= $row['pole']=="OK"?"ok":"ng" ?>">
+<?= $row['pole'] ?>
+</td>
+
+<td class="<?= $row['sticker']=="OK"?"ok":"ng" ?>">
+<?= $row['sticker'] ?>
+</td>
+
+<td class="<?= $row['type_battery']=="OK"?"ok":"ng" ?>">
+<?= $row['type_battery'] ?>
+</td>
+
+<td class="<?= $row['emboss']=="OK"?"ok":"ng" ?>">
+<?= $row['emboss'] ?>
+</td>
+
+<td class="<?= $row['datecode']=="NOK" ? "ng" : ($row['datecode']=="NO-DETECT" ? "warn" : "ok") ?>">
+<?= $row['datecode'] ?>
+</td>
+
+<td>
+<img class="thumb"
+src="http://10.19.22.147:8080/ProjectCameraInspection/uploads/<?= basename($row['image_path']) ?>"
+onclick="showImage(this.src)">
+</td>
+
+<td>
+<?= $row['barcode'] == "-" ? "<span class='warn'>NO SCAN</span>" : $row['barcode'] ?>
+</td>
+
+<?php
+
+$status = $row['status'];
+
+if($row['jenis'] == "MF"){
+
+    $tb = $row['type_battery'];
+    $dc = $row['datecode'];
+
+    if($tb == "NOK" && $dc == "NOK"){
+        $status = "NG";
+    }else{
+        $status = "OK";
+    }
+
+}
+
+
+?>
+
+<td class="<?= $status=="OK" ? "ok":"ng" ?>">
+<?= $status ?>
+</td>
+
+</tr>
+
+<?php } ?>
+
+</table>
+
+</div>
+
+<div id="imgPopup" class="popup">
+<span class="close" onclick="closeImage()">&times;</span>
+<img class="popup-content" id="popupImg">
+</div>
+
+<script>
+
+function showImage(src){
+document.getElementById("imgPopup").style.display="block";
+document.getElementById("popupImg").src=src;
+}
+
+function closeImage(){
+document.getElementById("imgPopup").style.display="none";
+}
+
+document.getElementById("searchInput").addEventListener("keyup", function(){
+
+var filter = this.value.toLowerCase();
+var rows = document.querySelectorAll("#dataTable tr");
+
+for(var i=1;i<rows.length;i++){
+
+let text = rows[i].innerText.toLowerCase();
+
+if(text.indexOf(filter) > -1){
+rows[i].style.display="";
+}else{
+rows[i].style.display="none";
+}
+
+}
+
+});
+
+</script>
+
+</body>
+</html>
