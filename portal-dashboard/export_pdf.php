@@ -1,5 +1,13 @@
 <?php
 
+// CRITICAL: Set memory limit BEFORE anything else
+ini_set('memory_limit', '1024M');
+ini_set('max_execution_time', 300);
+
+// Disable error display for clean PDF output
+error_reporting(0);
+ini_set('display_errors', 0);
+
 require_once 'dompdf/autoload.inc.php';
 
 use Dompdf\Dompdf;
@@ -37,9 +45,17 @@ elseif($shift == "3"){
 
 $whereSQL = count($where) ? "WHERE ".implode(" AND ", $where) : "";
 
+# Count total rows separately
+$count_query = "SELECT COUNT(*) FROM assy_vision $whereSQL";
+$total_count = $conn->query($count_query)->fetchColumn();
+
+# Limit data for PDF to prevent memory issues
+$max_rows = 200; // Limit to 200 rows for PDF (DomPDF is memory intensive)
+$limited_total = min($total_count, $max_rows);
+
 # ================= QUERY =================
 $query = "
-SELECT 
+SELECT TOP $max_rows
 created_at,
 barcode,
 jenis,
@@ -55,15 +71,16 @@ $whereSQL
 ORDER BY created_at DESC
 ";
 
-$data = $conn->query($query)->fetchAll(PDO::FETCH_ASSOC);
+$stmt = $conn->query($query);
 
-# ================= HTML PDF =================
-$html = '
+# Build HTML table with streaming approach
+ob_start();
+echo '
 <h2 style="text-align:center;">DATA HASIL INSPEKSI</h2>
 
 <p><b>Tanggal:</b> '.($selected_date ?: 'Semua').'</p>
 <p><b>Shift:</b> '.($shift ?: 'Semua').'</p>
-<p><b>Total Data:</b> '.count($data).'</p>
+<p><b>Total Data:</b> '.$total_count.' (PDF limited to '.$limited_total.' records)</p>
 
 <table border="1" cellpadding="5" cellspacing="0" width="100%">
 <tr style="background:#ccc;">
@@ -80,24 +97,27 @@ $html = '
 </tr>
 ';
 
-foreach($data as $row){
-    $html .= '
+# Stream data row by row
+while($row = $stmt->fetch(PDO::FETCH_ASSOC)){
+    echo '
     <tr>
-        <td>'.$row['created_at'].'</td>
-        <td>'.$row['barcode'].'</td>
-        <td>'.$row['jenis'].'</td>
-        <td>'.$row['type_pole'].'</td>
-        <td>'.$row['pole'].'</td>
-        <td>'.$row['sticker'].'</td>
-        <td>'.$row['type_battery'].'</td>
-        <td>'.$row['emboss'].'</td>
-        <td>'.$row['datecode'].'</td>
-        <td>'.$row['status'].'</td>
+        <td>'.htmlspecialchars($row['created_at']).'</td>
+        <td>'.htmlspecialchars($row['barcode']).'</td>
+        <td>'.htmlspecialchars($row['jenis']).'</td>
+        <td>'.htmlspecialchars($row['type_pole']).'</td>
+        <td>'.htmlspecialchars($row['pole']).'</td>
+        <td>'.htmlspecialchars($row['sticker']).'</td>
+        <td>'.htmlspecialchars($row['type_battery']).'</td>
+        <td>'.htmlspecialchars($row['emboss']).'</td>
+        <td>'.htmlspecialchars($row['datecode']).'</td>
+        <td>'.htmlspecialchars($row['status']).'</td>
     </tr>
     ';
 }
 
-$html .= '</table>';
+echo '</table>';
+
+$html = ob_get_clean();
 
 # ================= GENERATE PDF =================
 $dompdf = new Dompdf();
